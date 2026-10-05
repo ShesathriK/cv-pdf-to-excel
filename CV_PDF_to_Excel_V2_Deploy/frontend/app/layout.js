@@ -1,3 +1,5 @@
+import "./globals.css";
+
 export const metadata = {
   title: "Annexure Convertor",
   description: "Convert Legal Metrology CV certificates to Annexure-XXI Excel.",
