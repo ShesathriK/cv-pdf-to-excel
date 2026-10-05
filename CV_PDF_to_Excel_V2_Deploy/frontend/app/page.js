@@ -188,14 +188,14 @@ export default function Home() {
     <main className="page">
       <section className="hero">
         <div>
-          <div className="eyebrow">LEGAL METROLOGY</div>
-          <h1>CV PDF → Excel</h1>
+          <div className="eyebrow"><span className="dot" />LEGAL METROLOGY</div>
+          <h1>Annexure <span className="grad">Convertor</span></h1>
           <p className="sub">
             Upload verification certificates, review extracted records, and
             generate the Annexure-XXI stamping service sheet.
           </p>
         </div>
-        <div className="badge">V2</div>
+        <div className="badge"><span className="pulse" />V2</div>
       </section>
 
       <section className="card">
@@ -229,7 +229,7 @@ export default function Home() {
         {files.length > 0 && (
           <div className="fileList">
             {files.map((file) => (
-              <div className="fileRow" key={`${file.name}-${file.size}-${file.lastModified}`}>
+              <div className="fileRow" style={{ animationDelay: `${Math.min(files.indexOf(file), 10) * 50}ms` }} key={`${file.name}-${file.size}-${file.lastModified}`}>
                 <span>✓ {file.name}</span>
                 <span>{Math.round(file.size / 1024)} KB</span>
               </div>
@@ -290,14 +290,14 @@ export default function Home() {
 
         <div className="actions">
           <button onClick={preview} disabled={!files.length || loading}>
-            {loading ? "Processing…" : "1. Preview & Extract"}
+            {loading && <span className="spinner" />}{loading ? "Processing…" : "1. Preview & Extract"}
           </button>
           <button
             className="primary"
             onClick={generate}
             disabled={!hasPreview || !records.length || loading}
           >
-            {loading ? "Processing…" : "2. Generate Excel"}
+            {loading && <span className="spinner" />}{loading ? "Processing…" : "2. Generate Excel"}
           </button>
           <button
             className="quiet"
@@ -349,7 +349,7 @@ export default function Home() {
               </thead>
               <tbody>
                 {records.map((record, index) => (
-                  <tr key={`${record._source_pdf}-${index}`} className={record.review_required ? "needsReview" : ""}>
+                  <tr key={`${record._source_pdf}-${index}`} style={{ animationDelay: `${Math.min(index, 12) * 40}ms` }} className={record.review_required ? "needsReview" : ""}>
                     <td>{index + 1}</td>
                     <td className="source">{record._source_pdf}</td>
 

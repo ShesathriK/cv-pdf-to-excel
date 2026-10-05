@@ -26,10 +26,17 @@ FRONTEND_URLS = [
 ]
 
 BASE_DIR = Path(__file__).resolve().parent
-TEMPLATE = BASE_DIR.parent / "template" / "OLA_Annexure_XXI_template.xlsx"
+TEMPLATE_NAME = "OLA_Annexure_XXI_template.xlsx"
+# Look inside backend/ first (works when Render's Root Directory = backend),
+# then fall back to the repo-level template/ folder.
+_template_candidates = [
+    BASE_DIR / "template" / TEMPLATE_NAME,
+    BASE_DIR.parent / "template" / TEMPLATE_NAME,
+]
+TEMPLATE = next((t for t in _template_candidates if t.exists()), _template_candidates[0])
 
 app = FastAPI(
-    title="CV PDF to Excel Converter",
+    title="Annexure Convertor",
     version="2.0.0",
     description="Extract Tamil Nadu Legal Metrology verification certificates into the supplied Annexure-XXI Excel template.",
 )
@@ -431,6 +438,17 @@ def decode_records(records_json: str | None) -> list[dict[str, Any]] | None:
         return [dict(item) for item in payload]
     except Exception as exc:
         raise HTTPException(status_code=400, detail="Invalid records_json payload.") from exc
+
+
+@app.get("/")
+def root() -> dict[str, str]:
+    return {
+        "service": "Annexure Convertor API",
+        "status": "running",
+        "version": "2.0.0",
+        "docs": "/docs",
+        "health": "/health",
+    }
 
 
 @app.get("/health")

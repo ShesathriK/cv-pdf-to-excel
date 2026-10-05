@@ -1,4 +1,4 @@
-# CV PDF → Excel V2 — GitHub + Vercel + Render
+# Annexure Convertor V2 — GitHub + Vercel + Render
 
 This repository is the deployment-ready version of the CV PDF → Excel tool.
 
@@ -80,7 +80,7 @@ Render is used for the Python/PDF/Excel part.
 5. Use these settings:
 
 ```text
-Name: cv-pdf-to-excel-api
+Name: annexure-convertor
 Branch: main
 Root Directory: backend
 Runtime: Python

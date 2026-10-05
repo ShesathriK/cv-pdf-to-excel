@@ -1,5 +1,5 @@
 export const metadata = {
-  title: "CV PDF → Excel",
+  title: "Annexure Convertor",
   description: "Convert Legal Metrology CV certificates to Annexure-XXI Excel.",
 };
 
