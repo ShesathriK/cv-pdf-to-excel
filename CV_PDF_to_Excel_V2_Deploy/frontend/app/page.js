@@ -68,7 +68,7 @@ export default function Home() {
       setProcessedResults(files.map(f => f.name));
     } catch (err) {
       alert(`Error processing files: ${err.message}`);
-    } fontally {
+    } finally {
       setIsProcessing(false);
     }
   };
