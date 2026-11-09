@@ -1,5 +1,7 @@
+import "./globals.css";
+
 export const metadata = {
-  title: "CV PDF → Excel",
+  title: "CV PDF → Excel - Legal Metrology",
   description: "Convert Legal Metrology CV certificates to Annexure-XXI Excel.",
 };
 
