@@ -1,6 +1,12 @@
-# Annexure Convertor V2 — GitHub + Vercel + Render
+# CV PDF → Excel V2 — GitHub + Vercel + Render
 
 This repository is the deployment-ready version of the CV PDF → Excel tool.
+
+## Latest changes (November 2026)
+
+- Service charge defaults: ₹570 for capacities up to and including 3,000 kg; ₹2,860 for capacities above 3,000 kg. Exactly 3,000 kg uses ₹570. Both rates are editable in the frontend.
+- Annexure header PO reference: `ETPL/STM/G1070 Dtd. 11/05/2026`.
+- Prepared By name: `Kalyanikumar M`.
 
 ## What V2 includes
 
@@ -8,7 +14,7 @@ This repository is the deployment-ready version of the CV PDF → Excel tool.
 - Extracts CV Number, Date, Machine Number, Capacity (`Max`), Class, Customer Name, Location, Stamping Fee, 50% Additional Fee and OD.
 - Uses the supplied `OLA- Anexxure XXI_stamping service.xlsx` template.
 - Location is `HOSUR`.
-- Service charge defaults to ₹500 per certificate and can be changed.
+- Service charge defaults to ₹570 up to and including 3,000 kg and ₹2,860 above 3,000 kg; both rates are editable before Excel generation. Exactly 3,000 kg uses ₹570.
 - CC / TA-DA defaults to ₹100 per uploaded PDF, not per certificate.
 - `50% Additional Fee` is populated only when that label exists in the certificate; otherwise Site Stamping Fees remains blank.
 - OD is blank when missing or zero.
@@ -80,7 +86,7 @@ Render is used for the Python/PDF/Excel part.
 5. Use these settings:
 
 ```text
-Name: annexure-convertor
+Name: cv-pdf-to-excel-api
 Branch: main
 Root Directory: backend
 Runtime: Python
@@ -206,7 +212,7 @@ Vercel rebuilds the frontend and Render rebuilds the backend from the linked Git
 | 50% Additional Fee | Site Stamping Fees |
 | OD | OD Charges |
 | ₹100 / uploaded PDF | CC / TA-DA |
-| ₹500 / certificate | Service Charges |
+| ₹570 up to and including 3,000 kg; ₹2,860 above 3,000 kg | Service Charges |
 
 Important: A missing `50% Additional Fee` does **not** cause a 50% fee to be added.
 

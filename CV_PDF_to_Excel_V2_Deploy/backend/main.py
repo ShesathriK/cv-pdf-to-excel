@@ -26,17 +26,10 @@ FRONTEND_URLS = [
 ]
 
 BASE_DIR = Path(__file__).resolve().parent
-TEMPLATE_NAME = "OLA_Annexure_XXI_template.xlsx"
-# Look inside backend/ first (works when Render's Root Directory = backend),
-# then fall back to the repo-level template/ folder.
-_template_candidates = [
-    BASE_DIR / "template" / TEMPLATE_NAME,
-    BASE_DIR.parent / "template" / TEMPLATE_NAME,
-]
-TEMPLATE = next((t for t in _template_candidates if t.exists()), _template_candidates[0])
+TEMPLATE = BASE_DIR.parent / "template" / "OLA_Annexure_XXI_template.xlsx"
 
 app = FastAPI(
-    title="Annexure Convertor",
+    title="CV PDF to Excel Converter",
     version="2.0.0",
     description="Extract Tamil Nadu Legal Metrology verification certificates into the supplied Annexure-XXI Excel template.",
 )
@@ -353,9 +346,26 @@ def prepare_template(ws, record_count: int) -> int:
     return total_row
 
 
+def capacity_in_kg(value: Any) -> float | None:
+    """Convert extracted capacities such as 3000 Kg or 500 g to kilograms."""
+    if value is None:
+        return None
+    match = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*(kg|kgs|kilograms?|g|grams?|tons?|tonnes?)?", str(value), re.I)
+    if not match:
+        return None
+    amount = float(match.group(1))
+    unit = (match.group(2) or "kg").lower()
+    if unit in {"g", "gram", "grams"}:
+        return amount / 1000
+    if unit in {"ton", "tons", "tonne", "tonnes"}:
+        return amount * 1000
+    return amount
+
+
 def write_workbook(
     records: list[dict[str, Any]],
-    service_charge: float = 500,
+    service_charge_below_3000: float = 570,
+    service_charge_3000_and_above: float = 2860,
     cc_tada_per_pdf: float = 100,
     output_name: str = "Generated_Annexure_XXI.xlsx",
 ) -> io.BytesIO:
@@ -366,6 +376,8 @@ def write_workbook(
     ws = wb["Vendor Claim Sheet"]
 
     total_row = prepare_template(ws, len(records))
+    ws["F3"] = "ETPL/STM/G1070 Dtd. 11/05/2026"
+    ws["L39"] = "Name: Kalyanikumar M"
     start_row = 7
     seen_sources: set[str] = set()
 
@@ -402,7 +414,13 @@ def write_workbook(
         ws.cell(row, 15).value = None
 
         ws.cell(row, 16).value = f"=K{row}+L{row}+M{row}+N{row}+O{row}"
-        ws.cell(row, 17).value = service_charge
+        capacity_kg = capacity_in_kg(record.get("capacity"))
+        # Exactly 3,000 kg uses the lower service-charge slab.
+        ws.cell(row, 17).value = (
+            service_charge_3000_and_above
+            if capacity_kg is not None and capacity_kg > 3000
+            else service_charge_below_3000
+        )
         ws.cell(row, 18).value = f"=P{row}+Q{row}"
 
     end_data_row = 6 + len(records)
@@ -440,17 +458,6 @@ def decode_records(records_json: str | None) -> list[dict[str, Any]] | None:
         raise HTTPException(status_code=400, detail="Invalid records_json payload.") from exc
 
 
-@app.get("/")
-def root() -> dict[str, str]:
-    return {
-        "service": "Annexure Convertor API",
-        "status": "running",
-        "version": "2.0.0",
-        "docs": "/docs",
-        "health": "/health",
-    }
-
-
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok", "version": "2.0.0"}
@@ -480,14 +487,15 @@ async def extract(
 async def generate(
     request: Request,
     files: list[UploadFile] = File(...),
-    service_charge: float = Form(500),
+    service_charge_below_3000: float = Form(570),
+    service_charge_3000_and_above: float = Form(2860),
     cc_tada_per_pdf: float = Form(100),
     output_mode: str = Form("combined"),
     records_json: str | None = Form(None),
 ):
     check_password(request)
 
-    if service_charge < 0 or cc_tada_per_pdf < 0:
+    if service_charge_below_3000 < 0 or service_charge_3000_and_above < 0 or cc_tada_per_pdf < 0:
         raise HTTPException(status_code=400, detail="Charges cannot be negative.")
 
     if output_mode not in {"combined", "separate"}:
@@ -526,7 +534,8 @@ async def generate(
     if output_mode == "combined":
         output = write_workbook(
             records,
-            service_charge=service_charge,
+            service_charge_below_3000=service_charge_below_3000,
+            service_charge_3000_and_above=service_charge_3000_and_above,
             cc_tada_per_pdf=cc_tada_per_pdf,
         )
         return StreamingResponse(
@@ -550,7 +559,8 @@ async def generate(
         for source_name, group in grouped.items():
             workbook = write_workbook(
                 group,
-                service_charge=service_charge,
+                service_charge_below_3000=service_charge_below_3000,
+                service_charge_3000_and_above=service_charge_3000_and_above,
                 cc_tada_per_pdf=cc_tada_per_pdf,
                 output_name=f"{filename_stem(source_name)}_Annexure_XXI.xlsx",
             )

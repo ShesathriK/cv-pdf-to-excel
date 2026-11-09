@@ -45,7 +45,8 @@ export default function Home() {
   const [files, setFiles] = useState([]);
   const [records, setRecords] = useState([]);
   const [hasPreview, setHasPreview] = useState(false);
-  const [service, setService] = useState("500");
+  const [serviceBelow, setServiceBelow] = useState("570");
+  const [serviceAtOrAbove, setServiceAtOrAbove] = useState("2860");
   const [cc, setCc] = useState("100");
   const [outputMode, setOutputMode] = useState("combined");
   const [password, setPassword] = useState("");
@@ -151,7 +152,8 @@ export default function Home() {
     try {
       const formData = new FormData();
       files.forEach((file) => formData.append("files", file));
-      formData.append("service_charge", service);
+      formData.append("service_charge_below_3000", serviceBelow);
+      formData.append("service_charge_3000_and_above", serviceAtOrAbove);
       formData.append("cc_tada_per_pdf", cc);
       formData.append("output_mode", outputMode);
       formData.append("records_json", JSON.stringify(records));
@@ -188,14 +190,14 @@ export default function Home() {
     <main className="page">
       <section className="hero">
         <div>
-          <div className="eyebrow"><span className="dot" />LEGAL METROLOGY</div>
-          <h1>Annexure <span className="grad">Convertor</span></h1>
+          <div className="eyebrow">LEGAL METROLOGY</div>
+          <h1>CV PDF → Excel</h1>
           <p className="sub">
             Upload verification certificates, review extracted records, and
             generate the Annexure-XXI stamping service sheet.
           </p>
         </div>
-        <div className="badge"><span className="pulse" />V2</div>
+        <div className="badge">V2</div>
       </section>
 
       <section className="card">
@@ -229,7 +231,7 @@ export default function Home() {
         {files.length > 0 && (
           <div className="fileList">
             {files.map((file) => (
-              <div className="fileRow" style={{ animationDelay: `${Math.min(files.indexOf(file), 10) * 50}ms` }} key={`${file.name}-${file.size}-${file.lastModified}`}>
+              <div className="fileRow" key={`${file.name}-${file.size}-${file.lastModified}`}>
                 <span>✓ {file.name}</span>
                 <span>{Math.round(file.size / 1024)} KB</span>
               </div>
@@ -243,12 +245,21 @@ export default function Home() {
             <input value="HOSUR" readOnly />
           </label>
           <label>
-            Service charge / certificate
+            Service charge up to and including 3,000 kg (₹ / certificate)
             <input
               type="number"
               min="0"
-              value={service}
-              onChange={(event) => setService(event.target.value)}
+              value={serviceBelow}
+              onChange={(event) => setServiceBelow(event.target.value)}
+            />
+          </label>
+          <label>
+            Service charge above 3,000 kg (₹ / certificate)
+            <input
+              type="number"
+              min="0"
+              value={serviceAtOrAbove}
+              onChange={(event) => setServiceAtOrAbove(event.target.value)}
             />
           </label>
           <label>
@@ -284,20 +295,20 @@ export default function Home() {
         <div className="rules">
           <span>✓ 50% fee only when the PDF explicitly has “50% Additional Fee”</span>
           <span>✓ CC / TA-DA is added once per uploaded PDF</span>
-          <span>✓ Service charge defaults to ₹500 per certificate</span>
+          <span>✓ Service charge: ₹570 up to and including 3,000 kg; ₹2,860 above 3,000 kg</span>
           <span>✓ OD is blank when zero / absent</span>
         </div>
 
         <div className="actions">
           <button onClick={preview} disabled={!files.length || loading}>
-            {loading && <span className="spinner" />}{loading ? "Processing…" : "1. Preview & Extract"}
+            {loading ? "Processing…" : "1. Preview & Extract"}
           </button>
           <button
             className="primary"
             onClick={generate}
             disabled={!hasPreview || !records.length || loading}
           >
-            {loading && <span className="spinner" />}{loading ? "Processing…" : "2. Generate Excel"}
+            {loading ? "Processing…" : "2. Generate Excel"}
           </button>
           <button
             className="quiet"
@@ -349,7 +360,7 @@ export default function Home() {
               </thead>
               <tbody>
                 {records.map((record, index) => (
-                  <tr key={`${record._source_pdf}-${index}`} style={{ animationDelay: `${Math.min(index, 12) * 40}ms` }} className={record.review_required ? "needsReview" : ""}>
+                  <tr key={`${record._source_pdf}-${index}`} className={record.review_required ? "needsReview" : ""}>
                     <td>{index + 1}</td>
                     <td className="source">{record._source_pdf}</td>
 
