@@ -1,171 +1,472 @@
-'use me';
-import { useState, useRef } from 'react';
+"use client";
+
+import { useMemo, useState, useRef } from "react";
+
+const API = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/$/, "");
+
+const EDITABLE_FIELDS = [
+  ["cv_number", "CV No."],
+  ["cv_date", "CV Date"],
+  ["machine_number", "Machine Number"],
+  ["capacity", "Capacity"],
+  ["class", "Class"],
+  ["customer_name", "Customer Name"],
+  ["location", "Location"],
+  ["actual_stamping_fee", "Actual Stamping Fee"],
+  ["site_stamping_fee", "Site Stamping Fee"],
+  ["od_charges", "OD Charges"],
+];
+
+function formatMoney(value) {
+  if (value === null || value === undefined || value === "") return "";
+  return String(value);
+}
+
+async function readError(response) {
+  try {
+    const body = await response.json();
+    return body?.detail || "Request failed.";
+  } catch {
+    return `Request failed (${response.status}).`;
+  }
+}
+
+function flattenFiles(filesResponse) {
+  return filesResponse.flatMap((file) =>
+    file.certificates.map((certificate) => ({
+      ...certificate,
+      _source_pdf: file.filename,
+      _certificate_index: certificate._certificate_index,
+    }))
+  );
+}
 
 export default function Home() {
   const [files, setFiles] = useState([]);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [processedResults, setProcessedResults] = useState([]);
+  const [records, setRecords] = useState([]);
+  const [hasPreview, setHasPreview] = useState(false);
+  const [serviceBelow, setServiceBelow] = useState("570");
+  const [serviceAtOrAbove, setServiceAtOrAbove] = useState("2860");
+  const [cc, setCc] = useState("100");
+  const [outputMode, setOutputMode] = useState("combined");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState("");
+  const [dragActive, setDragActive] = useState(false);
   const fileInputRef = useRef(null);
 
-  // Append new files without replacing existing ones
-  const handleFileAdd = (newFileList) => {
-    const incoming = Array.from(newFileList).filter(
-      (file) => file.type === 'application/pdf' || file.name.endsWith('.pdf')
+  const issueCount = useMemo(
+    () => records.filter((record) => record.review_required).length,
+    [records]
+  );
+
+  // Append incoming PDF files without replacing existing files in the queue
+  function handleAddFiles(incomingFileList) {
+    const incomingPDFs = Array.from(incomingFileList || []).filter((file) =>
+      file.name.toLowerCase().endsWith(".pdf")
     );
 
+    if (!incomingPDFs.length) return;
+
     setFiles((prev) => {
-      // Avoid duplicate uploads by matching file name and size
-      const existingKeys = new Set(prev.map((f) => `${f.name}-${f.size}`));
-      const filteredIncoming = incoming.filter(
-        (f) => !existingKeys.has(`${f.name}-${f.size}`)
+      const existingKeys = new Set(prev.map((f) => `${f.name}-${f.size}-${f.lastModified}`));
+      const filteredIncoming = incomingPDFs.filter(
+        (f) => !existingKeys.has(`${f.name}-${f.size}-${f.lastModified}`)
       );
       return [...prev, ...filteredIncoming];
     });
-  };
 
-  const handleDrop = (e) => {
-    e.preventDefault();
-    if (e.dataTransfer.files) {
-      handleFileAdd(e.dataTransfer.files);
-    }
-  };
+    setRecords([]);
+    setHasPreview(false);
+    setMessage("");
+  }
 
-  const removeFile = (index) => {
-    setFiles((prev) => prev.filter((_, i) => i !== index));
-  };
+  function removeFile(indexToRemove) {
+    setFiles((prev) => prev.filter((_, idx) => idx !== indexToRemove));
+    setRecords([]);
+    setHasPreview(false);
+    setMessage("");
+  }
 
-  const clearAll = () => {
+  function clearAll() {
     setFiles([]);
-    setProcessedResults([]);
-  };
+    setRecords([]);
+    setHasPreview(false);
+    setMessage("");
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
 
-  const processFiles = async () => {
+  function updateRecord(index, field, value) {
+    setRecords((current) =>
+      current.map((record, recordIndex) => {
+        if (recordIndex !== index) return record;
+
+        const next = { ...record, [field]: value };
+
+        if (field === "actual_stamping_fee" || field === "site_stamping_fee" || field === "od_charges") {
+          next[field] = value === "" ? null : Number(value);
+          if (Number.isNaN(next[field])) next[field] = null;
+        }
+
+        const requiredValues = [
+          next.cv_number,
+          next.cv_date,
+          next.machine_number,
+          next.capacity,
+          next.class,
+          next.customer_name,
+          next.actual_stamping_fee,
+        ];
+        next.review_required = requiredValues.some((val) => val === "" || val === null || val === undefined);
+        next.warnings = [];
+        if (!next.cv_number) next.warnings.push("Missing CV Number");
+        if (!next.cv_date) next.warnings.push("Missing CV Date");
+        if (!next.machine_number) next.warnings.push("Missing Machine Number");
+        if (!next.capacity) next.warnings.push("Missing Capacity");
+        if (!next.class) next.warnings.push("Missing Class");
+        if (!next.customer_name) next.warnings.push("Missing Customer Name");
+        if (next.actual_stamping_fee === null || next.actual_stamping_fee === undefined) {
+          next.warnings.push("Missing Stamping Fee");
+        }
+
+        return next;
+      })
+    );
+  }
+
+  async function preview() {
     if (!files.length) return;
-    setIsProcessing(true);
 
-    const formData = new FormData();
-    files.forEach((file) => formData.append('files', file));
+    setLoading(true);
+    setMessage("");
 
     try {
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
-      const response = await fetch(`${backendUrl}/process-pdfs/`, {
-        method: 'POST',
+      const formData = new FormData();
+      files.forEach((file) => formData.append("files", file));
+
+      const response = await fetch(`${API}/extract`, {
+        method: "POST",
+        headers: password ? { "X-App-Password": password } : {},
         body: formData,
       });
 
-      if (!response.ok) throw new Error('Processing failed');
+      if (!response.ok) throw new Error(await readError(response));
 
-      // Trigger standard file download for converted Excel output
-      const blob = await response.blob();
-      const downloadUrl = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = downloadUrl;
-      a.download = `Extracted_CV_Data_${Date.now()}.xlsx`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-
-      setProcessedResults(files.map(f => f.name));
-    } catch (err) {
-      alert(`Error processing files: ${err.message}`);
+      const result = await response.json();
+      setRecords(flattenFiles(result.files || []));
+      setHasPreview(true);
+      setMessage("Extraction complete. Review any flagged rows before generating.");
+    } catch (error) {
+      setMessage(error.message || "Could not extract the PDFs.");
     } finally {
-      setIsProcessing(false);
+      setLoading(false);
     }
-  };
+  }
+
+  async function generate() {
+    if (!files.length || !records.length) {
+      setMessage("Preview the PDFs first, then generate the Excel.");
+      return;
+    }
+
+    if (issueCount > 0) {
+      setMessage(`Please correct ${issueCount} flagged row(s) before generating.`);
+      return;
+    }
+
+    setLoading(true);
+    setMessage("");
+
+    try {
+      const formData = new FormData();
+      files.forEach((file) => formData.append("files", file));
+      formData.append("service_charge_below_3000", serviceBelow);
+      formData.append("service_charge_3000_and_above", serviceAtOrAbove);
+      formData.append("cc_tada_per_pdf", cc);
+      formData.append("output_mode", outputMode);
+      formData.append("records_json", JSON.stringify(records));
+
+      const response = await fetch(`${API}/generate`, {
+        method: "POST",
+        headers: password ? { "X-App-Password": password } : {},
+        body: formData,
+      });
+
+      if (!response.ok) throw new Error(await readError(response));
+
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download =
+        outputMode === "combined"
+          ? "Generated_Annexure_XXI.xlsx"
+          : "Generated_Annexure_XXI_by_PDF.zip";
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+      setMessage("File generated successfully.");
+    } catch (error) {
+      setMessage(error.message || "Could not generate the Excel file.");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   return (
-    <main className="min-h-screen bg-slate-950 text-cyan-400 font-sans p-6 flex flex-col items-center justify-center relative overflow-hidden">
-      {/* Futuristic Background Glows */}
-      <div className="absolute top-10 left-1/4 w-96 h-96 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none" />
-      <div className="absolute bottom-10 right-1/4 w-96 h-96 bg-blue-600/10 rounded-full blur-3xl pointer-events-none" />
-
-      <div className="w-full max-w-4xl z-10 space-y-8">
-        {/* Header */}
-        <div className="text-center space-y-2">
-          <h1 className="text-4xl md:text-5xl font-extrabold tracking-wider bg-gradient-to-r from-cyan-400 via-teal-300 to-blue-500 bg-clip-text text-transparent">
-            NEXUS PDF EXTRACTOR
-          </h1>
-          <p className="text-slate-400 text-sm tracking-widest uppercase">
-            CV-to-Excel Automated Parsing Neural Engine
+    <main className="page">
+      <section className="hero">
+        <div>
+          <div className="eyebrow">LEGAL METROLOGY</div>
+          <h1>CV PDF → Excel</h1>
+          <p className="sub">
+            Upload verification certificates, review extracted records, and
+            generate the Annexure-XXI stamping service sheet.
           </p>
         </div>
+        <div className="badge">V2</div>
+      </section>
 
-        {/* Drop Zone Container */}
+      <section className="card">
         <div
-          onDragOver={(e) => e.preventDefault()}
-          onDrop={handleDrop}
-          onClick={() => fileInputRef.current?.click()}
-          className="border-2 border-dashed border-cyan-500/40 hover:border-cyan-400 bg-slate-900/60 backdrop-blur-md rounded-2xl p-8 text-center cursor-pointer transition-all duration-300 shadow-[0_0_25px_rgba(6,182,212,0.1)] hover:shadow-[0_0_35px_rgba(6,182,212,0.25)] flex flex-col items-center justify-center group"
+          className={`dropzone ${dragActive ? "active" : ""}`}
+          onDragOver={(event) => {
+            event.preventDefault();
+            setDragActive(true);
+          }}
+          onDragLeave={() => setDragActive(false)}
+          onDrop={(event) => {
+            event.preventDefault();
+            setDragActive(false);
+            handleAddFiles(event.dataTransfer.files);
+          }}
         >
           <input
-            type="file"
-            multiple
-            accept=".pdf"
+            id="pdf-input"
             ref={fileInputRef}
-            onChange={(e) => handleFileAdd(e.target.files)}
-            className="hidden"
+            type="file"
+            accept=".pdf"
+            multiple
+            onChange={(event) => {
+              handleAddFiles(event.target.files);
+              event.target.value = "";
+            }}
           />
-          <div className="w-16 h-16 mb-4 rounded-full bg-cyan-950/80 border border-cyan-500/30 flex items-center justify-center text-cyan-400 group-hover:scale-110 transition-transform">
-            <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-            </svg>
-          </div>
-          <p className="text-lg font-medium text-slate-200">
-            Drag & Drop PDF CVs here, or <span className="text-cyan-400 underline">Browse</span>
-          </p>
-          <p className="text-xs text-slate-500 mt-2">Supports single or multi-file sequential additions</p>
+          <label htmlFor="pdf-input">
+            <span className="dropIcon">↑</span>
+            <strong>Drop PDF files here</strong>
+            <span className="dropHint">or click to add one or multiple PDFs</span>
+          </label>
         </div>
 
-        {/* Uploaded Queue Section */}
         {files.length > 0 && (
-          <div className="bg-slate-900/80 backdrop-blur-md border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
-            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
-              <h2 className="text-sm font-semibold tracking-wider text-cyan-300 uppercase">
-                Queue ({files.length} {files.length === 1 ? 'File' : 'Files'})
-              </h2>
-              <button
+          <div className="fileList">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+              <span style={{ fontSize: '0.85rem', fontWeight: 600, color: '#334155' }}>
+                Uploaded Files ({files.length})
+              </span>
+              <button 
+                type="button" 
                 onClick={clearAll}
-                className="text-xs text-slate-400 hover:text-rose-400 transition-colors"
+                style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: '0.8rem', cursor: 'pointer', fontWeight: 500 }}
               >
-                Clear Queue
+                Clear all
               </button>
             </div>
-
-            <ul className="max-h-60 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
-              {files.map((file, idx) => (
-                <li
-                  key={`${file.name}-${idx}`}
-                  className="flex items-center justify-between p-3 rounded-lg bg-slate-950/60 border border-slate-800 hover:border-cyan-500/30 transition-all text-sm"
-                >
-                  <div className="flex items-center space-x-3 overflow-hidden">
-                    <span className="text-xs font-mono text-cyan-500">[{idx + 1}]</span>
-                    <span className="truncate text-slate-200 font-medium">{file.name}</span>
-                    <span className="text-xs text-slate-500">({(file.size / 1024).toFixed(1)} KB)</span>
-                  </div>
+            {files.map((file, idx) => (
+              <div className="fileRow" key={`${file.name}-${file.size}-${file.lastModified}-${idx}`}>
+                <span>✓ {file.name}</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <span>{Math.round(file.size / 1024)} KB</span>
                   <button
+                    type="button"
                     onClick={() => removeFile(idx)}
-                    className="text-slate-500 hover:text-rose-400 transition-colors p-1"
                     title="Remove file"
+                    style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: '1rem', padding: '0 4px' }}
                   >
-                    &#x2715;
+                    ×
                   </button>
-                </li>
-              ))}
-            </ul>
-
-            {/* Actions */}
-            <div className="pt-2">
-              <button
-                onClick={processFiles}
-                disabled={isProcessing}
-                className="w-full py-3.5 px-6 rounded-xl font-bold tracking-wider text-slate-950 bg-gradient-to-r from-cyan-400 to-teal-400 hover:from-cyan-300 hover:to-teal-300 disabled:opacity-50 transition-all duration-300 shadow-[0_0_20px_rgba(45,212,191,0.3)] hover:shadow-[0_0_30px_rgba(45,212,191,0.5)] cursor-pointer"
-              >
-                {isProcessing ? 'PROCESSING NEURAL CONVERSION...' : 'PROCESS ALL PDFS TO EXCEL'}
-              </button>
-            </div>
+                </div>
+              </div>
+            ))}
           </div>
         )}
-      </div>
+
+        <div className="settingsGrid">
+          <label>
+            Location
+            <input value="HOSUR" readOnly />
+          </label>
+          <label>
+            Service charge up to and including 3,000 kg (₹ / certificate)
+            <input
+              type="number"
+              min="0"
+              value={serviceBelow}
+              onChange={(event) => setServiceBelow(event.target.value)}
+            />
+          </label>
+          <label>
+            Service charge above 3,000 kg (₹ / certificate)
+            <input
+              type="number"
+              min="0"
+              value={serviceAtOrAbove}
+              onChange={(event) => setServiceAtOrAbove(event.target.value)}
+            />
+          </label>
+          <label>
+            CC / TA-DA / uploaded PDF
+            <input
+              type="number"
+              min="0"
+              value={cc}
+              onChange={(event) => setCc(event.target.value)}
+            />
+          </label>
+          <label>
+            Output
+            <select
+              value={outputMode}
+              onChange={(event) => setOutputMode(event.target.value)}
+            >
+              <option value="combined">One combined Excel</option>
+              <option value="separate">One Excel per PDF (ZIP)</option>
+            </select>
+          </label>
+          <label>
+            App password
+            <input
+              type="password"
+              placeholder="Only required when enabled on Render"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+            />
+          </label>
+        </div>
+
+        <div className="rules">
+          <span>✓ 50% fee only when the PDF explicitly has “50% Additional Fee”</span>
+          <span>✓ CC / TA-DA is added once per uploaded PDF</span>
+          <span>✓ Service charge: ₹570 up to and including 3,000 kg; ₹2,860 above 3,000 kg</span>
+          <span>✓ OD is blank when zero / absent</span>
+        </div>
+
+        <div className="actions">
+          <button onClick={preview} disabled={!files.length || loading}>
+            {loading ? "Processing…" : "1. Preview & Extract"}
+          </button>
+          <button
+            className="primary"
+            onClick={generate}
+            disabled={!hasPreview || !records.length || loading}
+          >
+            {loading ? "Processing…" : "2. Generate Excel"}
+          </button>
+          <button
+            className="quiet"
+            onClick={clearAll}
+            disabled={loading}
+          >
+            Clear
+          </button>
+        </div>
+
+        {message && <div className="message">{message}</div>}
+      </section>
+
+      {hasPreview && (
+        <section className="card">
+          <div className="sectionHead">
+            <div>
+              <h2>Review extracted data</h2>
+              <p>Edit any cell before creating the final workbook.</p>
+            </div>
+            <div className={`count ${issueCount ? "warn" : ""}`}>
+              {records.length} certificates
+              {issueCount ? ` · ${issueCount} need review` : " · ready"}
+            </div>
+          </div>
+
+          <div className="tableWrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Source PDF</th>
+                  <th>CV No.</th>
+                  <th>Date</th>
+                  <th>Machine No.</th>
+                  <th>Capacity</th>
+                  <th>Class</th>
+                  <th>Customer</th>
+                  <th>Stamping</th>
+                  <th>50% Additional</th>
+                  <th>OD</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {records.map((record, index) => (
+                  <tr key={`${record._source_pdf}-${index}`} className={record.review_required ? "needsReview" : ""}>
+                    <td>{index + 1}</td>
+                    <td className="source">{record._source_pdf}</td>
+
+                    {EDITABLE_FIELDS.map(([field, label]) => (
+                      <td key={field}>
+                        <input
+                          aria-label={`${label} row ${index + 1}`}
+                          type={
+                            field === "actual_stamping_fee" ||
+                            field === "site_stamping_fee" ||
+                            field === "od_charges"
+                              ? "number"
+                              : "text"
+                          }
+                          min={
+                            field === "actual_stamping_fee" ||
+                            field === "site_stamping_fee" ||
+                            field === "od_charges"
+                              ? "0"
+                              : undefined
+                          }
+                          value={
+                            field === "site_stamping_fee" || field === "od_charges"
+                              ? formatMoney(record[field])
+                              : record[field] ?? ""
+                          }
+                          onChange={(event) =>
+                            updateRecord(index, field, event.target.value)
+                          }
+                        />
+                      </td>
+                    ))}
+
+                    <td>
+                      {record.review_required ? (
+                        <span className="status bad" title={record.warnings.join(", ")}>
+                          Review
+                        </span>
+                      ) : (
+                        <span className="status ok">OK</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="footNote">
+            <strong>Excel mapping:</strong> CV No. → VC Number, Date → VC Date,
+            Machine No. → Machine Number, Max → Capacity, customer after
+            “belonging to M/S” → Customer Name, HOSUR → Location, Stamping Fee
+            → Actual Stamping Fees, 50% Additional Fee → Site Stamping Fees,
+            OD → OD Charges.
+          </div>
+        </section>
+      )}
     </main>
   );
 }
